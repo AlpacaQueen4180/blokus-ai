@@ -12,7 +12,6 @@ def rotateY(pt, refpt, deg):
 def rotateP(pt, refpt, deg):
     return (int(round(rotateX(pt, refpt, deg))), int(round(rotateY(pt, refpt, deg))))
 
-
 class Shape:
     def __init__(self, id, size, x, y):
         self.id = id
@@ -282,3 +281,5 @@ class Y(Shape):
         self.points = [(x, y), (x, y + 1), (x + 1, y), (x + 2, y), (x - 1, y)]
         self.corners = [(x + 3, y - 1), (x + 3, y + 1), (x + 1, y + 2),
                         (x - 1, y + 2), (x - 2, y + 1), (x - 2, y - 1)]
+
+ALL_SHAPE = []
