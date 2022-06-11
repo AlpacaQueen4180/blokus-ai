@@ -4,6 +4,14 @@ import random
 import copy
 import numpy as np
 from chess import *
+from dataclasses import dataclass
+
+
+@dataclass
+class Action:
+    shape: Shape
+    rotate: int = 0
+    flip: bool = False
 
 
 class Board:
@@ -54,14 +62,15 @@ class Board:
         print("Current Board Layout:")
         for row in range(len(self.state)):
             for col in range(len(self.state[0])):
-                print(" " + str(self.state[row][col]), end = '')
+                print(" " + str(self.state[row][col]), end='')
             print()
 
 
 class GameState:
     def __init__(self, playerid, strategy, board):
         self.playerid = playerid                    # player's id
-        self.pieces: list[Shape] = []                # player's unused game piece, list of Pieces
+        # player's unused game piece, list of Pieces
+        self.pieces: list[Shape] = []
         self.corners = set()            # current valid corners on board
         self.strategy = strategy        # player's strategy
         self.score = 0                  # player's current score
@@ -91,13 +100,13 @@ class GameState:
                 self.corners.add(c)
 
     # Updates the corners of the player, in case the corners have been covered by another player's pieces.
-    def getpossiblemoves(self, pieces: list(Shape), game):
+    def get_possible_moves(self, game):
         self.corners = set(
             [(x, y) for (x, y) in self.corners if game.board.state[y][x] == '_'])
         placements = []  # a list of possible placements
         visited = []  # a list placements (a set of points on board)
         for cr in self.corners:          # Check every available corner
-            for sh in pieces:            # Check every available piece
+            for sh in self.pieces:            # Check every available piece
                 # Check every reference point the piece could have
                 for num in range(sh.size):
                     for flip in ["h", "v"]:                         # Check every flip
@@ -113,49 +122,61 @@ class GameState:
                                     placements.append(candidate)
                                     visited.append(set(candidate.points))
         return placements
+
     def nextmove(self, game):
         return self.strategy(self, game)
 
+
 class Blokus:
-    def __init__(self, players, board, allpieces):
+    def __init__(self, players: list[GameState], board: Board):
         self.players = players              # list of players in the game
         self.rounds = 0                     # current round in the game
         self.board = board                  # the game's board
-        self.allpieces = allpieces          # all the initial pieces in the game
         self.previous = 0                   # previous total available moves from all players
-        self.repeat = 0                     # counter for how many times the total available moves are the same by checking previous round
+        # counter for how many times the total available moves are the same by checking previous round
+        self.repeat = 0
         self.winplayer = 0                  # winner
-        # Check for the winner (or tied) in the game and return the winner's id. Or return nothing if the game can still progress
-    
-    def winner(self):                       # get all possible moves for all players
-        moves = [p.possiblemoves(p.pieces, self) for p in self.players]
-    # check how many rounds the total available moves from all players are the same and increment the counter if so
+
+    def winner(self) -> list[GameState] | None:
+        """
+        Check for the winner (or tied) in the game and return the winner's id. Or return nothing if the game can still progress
+        """                  
+        # get all possible moves for all players
+        moves = [p.get_possible_moves(p.pieces, self) for p in self.players]
+
+        # check how many rounds the total available moves from all players are the same and increment the counter if so
         if self.previous == sum([len(mv) for mv in moves]):
             self.repeat += 1
         else:
             self.repeat = 0
-    # if there is still moves possible or total available moves remain static for too many rounds (repeat reaches over a certain threshold)
+
+        # if there is still moves possible or total available moves remain static for too many rounds (repeat reaches over a certain threshold)
         if False in [len(mv) == 0 for mv in moves] and self.repeat < 4:
             self.previous = sum([len(mv) for mv in moves])
             return None                         # Nothing to return to continue the game
         else:                                   # No more move available, the game ends order the players by highest score first
             candidates = [(p.score, p.id) for p in self.players]
-            candidates.sort(key = lambda x: x[0], reverse = True)
+            candidates.sort(key=lambda x: x[0], reverse=True)
             highest = candidates[0][0]
             result = [candidates[0][1]]
-        for candidate in candidates[1:]:                # check for tied score
+
+        # Check for tied score
+        for candidate in candidates[1:]:
             if highest == candidate[0]:
                 result += [candidate[1]]
+        
         return result
-    def validmove(self, player, placement):
+
+    def valid_move(self, player, placement):
         if self.rounds < len(self.players):             # Check for starting corner
             return not ((False in [self.board.inbounds(pt) for pt in placement])
-                or self.board.overlap(placement)
-                or not (True in [(pt in player.corners) for pt in placement]))
+                        or self.board.overlap(placement)
+                        or not (True in [(pt in player.corners) for pt in placement]))
         return not ((False in [self.board.inbounds(pt) for pt in placement])
-            or self.board.overlap(placement)
-            or self.board.adj(player.id, placement)
-            or not self.board.corner(player.id, placement))
+                    or self.board.overlap(placement)
+                    or self.board.adj(player.id, placement)
+                    or not self.board.corner(player.id, placement))
+
     def play(self):
         # At the beginning of the game, it should give the players their pieces and a corner to start.
         if self.rounds == 0:                    # set up starting corners and players' initial pieces
@@ -168,21 +189,27 @@ class Blokus:
         winner = self.winner()                  # get game status
         if winner is None:                      # no winner, the game continues
             current = self.players[0]           # get current player
-            proposal = current.nextmove(self)   # get the next move based on the player's strategy
+            # get the next move based on the player's strategy
+            proposal = current.nextmove(self)
             if proposal is not None:            # if there a possible proposed move check if the move is valid
-                if self.validmove(current, proposal.points):    # update the board and the player status
+                # update the board and the player status
+                if self.valid_move(current, proposal.points):
                     self.board.update(current.id, proposal.points)
                     current.updateplayer(proposal, self.board)
-                    current.removepiece(proposal)               # remove used piece
+                    # remove used piece
+                    current.removepiece(proposal)
                 else:                                           # end the game if an invalid move is proposed
-                    raise Exception("Invalid move by player " + str(current.id))
+                    raise Exception(
+                        "Invalid move by player " + str(current.id))
         # put the current player to the back of the queue
             first = self.players.pop(0)
             self.players += [first]
             self.rounds += 1                                    # update game round
-        else:                                                   # a winner (or tied) is found
+        # a winner (or tied) is found
+        else:
             if len(winner) == 1:                                # if the game results in a winner
                 self.winplayer = winner[0]
                 print('Game over! The winner is: ' + str(winner[0]))
             else:                                               # if the game results in a tie
-                print('Game over! Tied between players: ' + ', '.join(map(str, winner)))
+                print('Game over! Tied between players: ' +
+                      ', '.join(map(str, winner)))
