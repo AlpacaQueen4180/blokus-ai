@@ -2,37 +2,46 @@ import sys
 import math
 import random
 import copy
-import numpy as np
+from typing import Literal
 from chess import *
 from dataclasses import dataclass
 
+from colorama import init, Back
+init()
 
-@dataclass
-class Action:
-    shape: Shape
-    rotate: int = 0
-    flip: bool = False
-
+BOARD_COL = 20
+BOARD_ROW = 20
+PLAYER_NUM = 4
 
 class Board:
     def __init__(self, nrow, ncol):
+        """
+        (0, 0) left-bottom, (row, col), top-right
+        """
         self.nrow = nrow
         self.ncol = ncol
         self.state = [['_'] * ncol for _ in range(nrow)]
 
-    def update(self, playerid, placement):
+    def place(self, playerid, placement):
         for row in range(self.nrow):
             for col in range(self.ncol):
                 if(col, row) in placement:
-                    self.state[row][col] = playerid
+                    self.state[col][row] = playerid
 
-    def inbounds(self, point):
-        return 0 <= point[0] < self.ncol and 0 <= point[1] < self.nrow
+    def inbounds(self, placement):
+        """Check if placement inbounds"""
+        # return 0 <= point[0] < self.ncol and 0 <= point[1] < self.nrow
+        for x, y in placement:
+            if not (0 <= x < self.ncol and 0 <= y < self.nrow):
+                return False
+        return True
 
     def overlap(self, placement):
-        return False in [(self.state[y][x] == '_') for x, y in placement]
+        """Check if placement overlap"""
+        return False in [self.state[y][x] == '_' for x, y in placement]
 
     def adj(self, playerid, placement):
+        """Check if placement adj to own piece"""
         adjacents = []
         for x, y in placement:
             if self.inbounds((x + 1, y)):
@@ -46,6 +55,7 @@ class Board:
         return True in adjacents
 
     def corner(self, playerid, placement):
+        """Check if placed at corner"""
         corners = []
         for x, y in placement:
             if self.inbounds((x + 1, y + 1)):
@@ -58,89 +68,128 @@ class Board:
                 corners += [self.state[y + 1][x - 1] == playerid]
         return True in corners
 
-    def printboard(self):
+    def print(self):
         print("Current Board Layout:")
-        for row in range(len(self.state)):
-            for col in range(len(self.state[0])):
-                print(" " + str(self.state[row][col]), end='')
-            print()
+        for row in reversed(range(self.nrow)):
+            for col in range(self.ncol):
+                match self.state[col][row]:
+                    case 0: print(Back.BLUE + '  ', end='')
+                    case 1: print(Back.GREEN + '  ', end='')
+                    case 2: print(Back.RED + '  ', end='')
+                    case 3: print(Back.YELLOW + '  ', end='')
+                    case _: print(Back.RESET + '--', end='')      
+            print(Back.RESET)
 
 
-class GameState:
-    def __init__(self, playerid, strategy, board):
-        self.playerid = playerid                    # player's id
+class Player:
+    def __init__(self, id: int, agent, board: Board):
+        self.id = id                    # player's id
         # player's unused game piece, list of Pieces
-        self.pieces: list[Shape] = []
+        self.pieces = copy.copy(SHAPES_ID)
         self.corners = set()            # current valid corners on board
-        self.strategy = strategy        # player's strategy
+        self.agent = agent              # player's strategy
         self.score = 0                  # player's current score
-        self.is_blocked = False
-        self.board = board
+        self.is_blocked = False         #
+        self.board = board              # The game board
 
-    def getscore(self):
+    def __repr__(self) -> str:
+        return f"""
+        Player {self.id}:
+            Score: {self.score}
+            Agent: {self.agent}
+            Pieces: {self.pieces}
+            Placed Pieces: {SHAPES_ID - self.pieces}
+            Corners: {self.corners}
+        """
+
+    def get_score(self):
         return self.score
 
-    def getunusedpiece(self):
+    def get_unused_piece(self):
         return self.pieces
 
-    def addpieces(self, pieces):
-        self.pieces = pieces
+    def add_pieces(self, pieces):
+        self.pieces.add(pieces)
 
-    def removepiece(self, piece):
-        self.pieces = [p for p in self.pieces if p.id != piece.id]
+    def remove_piece(self, piece_id: str):
+        self.pieces.remove(piece_id)
 
-    def updateplayer(self, piece: Shape, board: Board):
-        self.score += piece.size  # If you're placing your last piece, you get +15 bonus
+    def add_corner(self, corner):
+        self.corners.add(corner)
+
+    def remove_corner(self, corner):
+        self.corners.remove(corner)
+
+    def update_corner(self):
+        corners = set()
+        board = self.board
+        for y in range(BOARD_ROW):
+            for x in range(BOARD_COL):
+                if self.board.state[y][x] != self.id: continue
+                for dy, dx in [(1, 1), (1, -1), (-1, 1), (-1, -1)]:
+                    if not board.inbounds([(y+dy, x+dx)]) or self.board.state[y + dy][x + dx] != '_': continue
+                    l = []
+                    for ey, ex in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+                        if not board.inbounds([(y+dy+ey, x+dx+ex)]): continue
+                        l.append(self.board.state[y + dy + ey][x + dx + ex])
+                    if self.id not in l: 
+                        corners.add((y+dy, x+dx))
+        self.corners = corners
+
+    def update_player(self, piece: Shape):
+        """
+        Place piece, update score, corners
+        """
+        self.score += piece.size
+        # If you're placing your last piece, you get +15 bonus
         if len(self.pieces) == 1:
             self.score += 15
-            if piece.id == 'Pole':  # +5 extra if its the [] piece
+            if piece.id == 'I1':  # +5 extra if the piece is I1
                 self.score += 5
-        for c in piece.corners:  # Add the player's available corners
-            if board.inbounds(c) and not board.overlap([c]):
-                self.corners.add(c)
-
-    # Updates the corners of the player, in case the corners have been covered by another player's pieces.
-    def get_possible_moves(self, game):
-        self.corners = set(
-            [(x, y) for (x, y) in self.corners if game.board.state[y][x] == '_'])
-        placements = []  # a list of possible placements
-        visited = []  # a list placements (a set of points on board)
-        for cr in self.corners:          # Check every available corner
-            for sh in self.pieces:            # Check every available piece
-                # Check every reference point the piece could have
-                for num in range(sh.size):
-                    for flip in ["h", "v"]:                         # Check every flip
-                        for rot in [0, 90, 180, 270]:               # Check every rotation
-                            # Create a copy to prevent an overwrite on the original
-                            candidate = copy.deepcopy(sh)
-                            candidate.create(num, cr)
-                            candidate.flip(flip)
-                            candidate.rotate(rot)
-                            # If the placement is valid and new
-                            if game.validmove(self, candidate.points):
-                                if not set(candidate.points) in visited:
-                                    placements.append(candidate)
-                                    visited.append(set(candidate.points))
-        return placements
-
-    def nextmove(self, game):
-        return self.strategy(self, game)
+        # Add the player's available corners
+        for c in piece.corners:  
+            print(c)
+            if self.board.inbounds([c]) and not self.board.overlap([c]):
+                self.add_corner(c)
+        self.remove_piece(piece.id)
+        for point in piece.points:
+            if point in self.corners: self.remove_corner(point)
 
 
 class Blokus:
-    def __init__(self, players: list[GameState], board: Board):
-        self.players = players              # list of players in the game
-        self.rounds = 0                     # current round in the game
-        self.board = board                  # the game's board
+    def __init__(self, players = [], row = 20, col = 20):
+        self.player_agent = players
+        self.player_num = len(players)              # list of players in the game
+        self.rounds = 0                        # current round in the game
+        self.board = Board(row, col)                  # the game's board
         self.previous = 0                   # previous total available moves from all players
         # counter for how many times the total available moves are the same by checking previous round
         self.repeat = 0
         self.winplayer = 0                  # winner
+        self.init_players()
 
-    def winner(self) -> list[GameState] | None:
+    def init_players(self):
+        self.players = [Player(i, agent, self.board) for i, agent in enumerate(self.player_agent)]
+        corners = [(0, self.board.nrow-1), (0, 0), (self.board.ncol-1, 0), (self.board.ncol-1, self.board.nrow-1)]
+        for i, corner in enumerate(corners):
+            self.players[i].corners.add(corner)
+
+    def place(self, player_id, action: Action):
+        shape: Shape = SHAPES_CLASS[action.shape](*action.coord)
+        print(shape.points)
+        # shape.place((0, 19), (0, 19))
+        if not self.valid_move(player_id, shape.points):
+            print("not a valid move")
+            return
+        self.board.place(player_id, shape.points)
+        self.players[player_id].update_player(shape)
+        print(f"placed {shape.id} at {action.coord}")
+        self.board.print()
+
+    def winner(self):
         """
         Check for the winner (or tied) in the game and return the winner's id. Or return nothing if the game can still progress
-        """                  
+        """
         # get all possible moves for all players
         moves = [p.get_possible_moves(p.pieces, self) for p in self.players]
 
@@ -164,43 +213,56 @@ class Blokus:
         for candidate in candidates[1:]:
             if highest == candidate[0]:
                 result += [candidate[1]]
-        
         return result
 
-    def valid_move(self, player, placement):
-        if self.rounds < len(self.players):             # Check for starting corner
-            return not ((False in [self.board.inbounds(pt) for pt in placement])
-                        or self.board.overlap(placement)
-                        or not (True in [(pt in player.corners) for pt in placement]))
-        return not ((False in [self.board.inbounds(pt) for pt in placement])
-                    or self.board.overlap(placement)
-                    or self.board.adj(player.id, placement)
-                    or not self.board.corner(player.id, placement))
+    def get_possible_moves(self, player_id):
+        # Updates the corners of the player, in case the corners have been covered by another player's pieces.
+        # self.corners = set(
+        #     [(x, y) for (x, y) in self.corners if game.board.state[y][x] == '_'])
+        placements = []  # a list of possible placements
+        visited = []  # a list placements (a set of points on board)
+        player = self.players[player_id]
+        for cr in player.corners:          # Check every available corner
+            # for sh in player.pieces:           # Check every available piece
+            sh = 'I2'
+            # Check every reference point the piece could have
+            shape: Shape = SHAPES_CLASS[sh](0, 0)
+            for i in range(shape.size):
+                for flip in [False, True]:             # Check every flip
+                    for rot in range(4):               # Check every rotation
+                        # Create a copy to prevent an overwrite on the original
+                        if flip: shape.flip()
+                        shape.rotate(rot)
+                        shape.place(shape.points[i], cr)
+                        # If the placement is valid and new
+                        if self.valid_move(player.id, shape.points):
+                            if set(shape.points) not in visited:
+                                placements.append((shape.id, shape.points))
+                                visited.append(set(shape.points))
+        return placements
 
-    def play(self):
-        # At the beginning of the game, it should give the players their pieces and a corner to start.
-        if self.rounds == 0:                    # set up starting corners and players' initial pieces
-            maxx = self.board.ncol - 1
-            maxy = self.board.nrow - 1
-            starts = [(0, 0), (maxx, maxy), (0, maxy), (maxx, 0)]
-            for i in range(len(self.players)):
-                self.players[i].addpieces(list(self.allpieces))
-                self.players[i].startcorner(starts[i])
+    def get_next_move(self, player_id) -> Action:
+        return self.players[player_id].agent.get_next_move(self)
+
+    def valid_move(self, player_id, placement):
+        if self.rounds < len(self.players):             # Check for starting corner
+            return (self.board.inbounds(placement)
+                    and not self.board.overlap(placement)
+                    and (True in [(pt in self.players[player_id].corners) for pt in placement]))
+        return (self.board.inbounds(placement)
+                and not self.board.overlap(placement)
+                and not self.board.adj(player_id, placement)
+                and self.board.corner(player_id, placement))
+
+    def play(self):        
         winner = self.winner()                  # get game status
         if winner is None:                      # no winner, the game continues
             current = self.players[0]           # get current player
             # get the next move based on the player's strategy
-            proposal = current.nextmove(self)
-            if proposal is not None:            # if there a possible proposed move check if the move is valid
+            act = current.next_move(self)
+            if act is not None:            # if there a possible proposed move check if the move is valid
                 # update the board and the player status
-                if self.valid_move(current, proposal.points):
-                    self.board.update(current.id, proposal.points)
-                    current.updateplayer(proposal, self.board)
-                    # remove used piece
-                    current.removepiece(proposal)
-                else:                                           # end the game if an invalid move is proposed
-                    raise Exception(
-                        "Invalid move by player " + str(current.id))
+                self.place(current.id, act)
         # put the current player to the back of the queue
             first = self.players.pop(0)
             self.players += [first]

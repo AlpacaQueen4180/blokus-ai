@@ -1,43 +1,62 @@
-import PIL
 from PIL import ImageGrab
 from PIL import Image
 import time
-from gamestate import board
-import numpy as np
+from gamestate import *
+# import numpy as np
 
 
-def get_screen() : 
-    start = ImageGrab.grab()
-    start.save('start.png')
-    agent_id = check_id()
-    while True :
-        screen = ImageGrab.grab()
-        screen.save('screen.png')
-        if check_id('screen.png') == agent_id :
-            get_board()
-        time.sleep(5)
-def get_board() :
-    screen = Image.open("screen.png")
-    screen.convert('RGB')
-    for x in range(20):
-        for y in range(20):
-            color = screen.getpixel(360 + 32*x, 805 + 32*y)
+# def get_screen():
+#     img = ImageGrab.grab()
+#     agent_id = check_id(img)
+#     while True:
+#         screen = ImageGrab.grab()
+#         screen.save('screen.png')
+#         if check_id('screen.png') == agent_id:
+#             get_board()
+#         time.sleep(5)
+
+
+def get_board_from_screen(board: Board):
+    """
+    Updates the board in place with the screen content.
+    """
+    screen = ImageGrab.grab((590, 370, 1495, 1275))
+    tile = (904 / (BOARD_COL - 1), 904 / (BOARD_ROW - 1))
+    # agent_id = check_id(screen)
+    for x in range(BOARD_COL):
+        for y in range(BOARD_ROW):
+            coord = (round(tile[0] * x), round(tile[1] * y))
+            color = screen.getpixel(coord)
+            # screen.putpixel(coord, (0, 0, 0))
             id = check_color(color)
-            if id == 0 : board.state[x][y] = '_'
-            else : board.state[x][y] = id
-def check_color(color) :
-    if color == (35, 121, 198) : player = 1      #blue
-    if color == (255, 169, 37) : player = 2      #green
-    if color == (152, 0, 113) : player = 3       #purple
-    if color == (0, 171, 102) : player = 4       #orange
-    if color == (203, 213, 223) : player = 0
-    return player
-def check_id(picname) : 
-    start = Image.open(picname)
-    start.convert('RGB')
-    if start.getpixel(50, 225) != (236, 240, 247) : agent_id = 1   #blue
-    elif start.getpixel(50, 555) != (226, 247, 240) : agent_id = 2 #green
-    elif start.getpixel(1000, 555) != (236, 230 ,242) : agent_id = 3    #purple
-    elif start.getpixel(1000, 225) != (255, 249, 231) : agent_id = 4    #orange
+            board.state[x][BOARD_ROW - 1 - y] = id
+    # screen.show()
+
+
+def check_color(color):
+    if color == (68, 119, 198):
+        player_id = 0  # blue
+    elif color == (14, 168, 96):
+        player_id = 1  # green
+    elif color == (137, 13, 116):
+        player_id = 2  # purple
+    elif color == (255, 173, 51):
+        player_id = 3  # orange
+    else:
+        player_id = '_'
+    return player_id
+
+
+def check_id():
+    # img.convert('RGB')
+    img = ImageGrab.grab()
+    if img.getpixel((90, 785)) != ((237, 240, 247)): raise Exception("Not a Blokus screen")
+    if img.getpixel((90, 340)) != (237, 240, 247):
+        agent_id = 0    # blue
+    elif img.getpixel((90, 870)) != (230, 246, 239):
+        agent_id = 1    # green
+    elif img.getpixel((1615, 870)) != (235, 230, 242):
+        agent_id = 2    # purple
+    elif img.getpixel((1615, 340)) != (254, 249, 231):
+        agent_id = 3    # orange
     return agent_id
-    
